@@ -24,5 +24,5 @@ extern "C" {
         versions->Set(String::NewSymbol("v8"), String::New(V8::GetVersion()));
         target->Set(String::NewSymbol("versions"), versions);
     }
-    NODE_MODULE(_zipfile, init);
+    NODE_MODULE(zipfile, init);
 }
