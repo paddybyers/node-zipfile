@@ -5,7 +5,7 @@
 extern "C" {
 #include <zlib.h>
 #include <errno.h>
-#include <zip.h>
+#include <unzip.h>
 }
 
 #include <v8.h>
@@ -14,7 +14,6 @@ extern "C" {
 
 // stl
 #include <string>
-#include <vector>
 
 
 using namespace v8;
@@ -25,6 +24,7 @@ class ZipFile: public node::ObjectWrap {
     static Persistent<FunctionTemplate> constructor;
     static void Initialize(Handle<Object> target);
     static Handle<Value> New(const Arguments &args);
+    static Handle<Value> Destroy(const Arguments &args);
 
     static Handle<Value> get_prop(Local<String> property,
                                   const AccessorInfo& info);
@@ -34,16 +34,18 @@ class ZipFile: public node::ObjectWrap {
 
     // Async
     static Handle<Value> readFile(const Arguments& args);
-    static void Work_ReadFile(uv_work_t* req);
-    static void Work_AfterReadFile(uv_work_t* req);
 
     explicit ZipFile(std::string const& file_name);
 
  private:
     ~ZipFile();
     std::string const file_name_;
-    struct zip *archive_;
-    std::vector<std::string> names_;
+    int count_;
+    unzFile archive_;
+    Persistent<Array> names_;
+
+    static void Work_ReadFile(uv_work_t* req);
+    static void Work_AfterReadFile(uv_work_t* req);
 };
 
 #endif  // INCLUDE_ZIPFILE_NODE_ZIPFILE_H_

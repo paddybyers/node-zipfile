@@ -4,7 +4,6 @@
 
 // std
 #include <sstream>
-#include <vector>
 #include <string>
 #include <algorithm>
 
@@ -32,11 +31,11 @@ void ZipFile::Initialize(Handle<Object> target) {
 ZipFile::ZipFile(std::string const& file_name)
     : ObjectWrap(),
       file_name_(file_name),
-      archive_(),
-      names_() {}
+      archive_() {}
 
 ZipFile::~ZipFile() {
-    zip_close(archive_);
+    if(archive_)
+      unzClose(archive_);
 }
 
 Handle<Value> ZipFile::New(const Arguments& args) {
@@ -50,31 +49,63 @@ Handle<Value> ZipFile::New(const Arguments& args) {
                                   String::New("first argument must be a path to a zipfile")));
 
     std::string input_file = TOSTR(args[0]);
-    struct zip *za;
-    int err;
-    char errstr[1024];
-    if ((za = zip_open(input_file.c_str(), 0, &err)) == NULL) {
-        zip_error_to_str(errstr, sizeof(errstr), err, errno);
+    unzFile za;
+    if ((za = unzOpen(input_file.c_str())) == NULL) {
         std::stringstream s;
-        s << "cannot open file: " << input_file << " error: " << errstr << "\n";
+        s << "Unable to open file: " << input_file << "\n";
         return ThrowException(Exception::Error(
                                   String::New(s.str().c_str())));
     }
 
     ZipFile* zf = new ZipFile(input_file);
+  
+    unz_global_info zInfo;
+    if (unzGetGlobalInfo(za, &zInfo) != UNZ_OK) {
+      std::stringstream s;
+      s << "Unable to process file: " << input_file << "\n";
+      return ThrowException(Exception::Error(
+                                           String::New(s.str().c_str())));
+    }
 
-    int num = zip_get_num_files(za);
-    zf->names_.reserve(num);
+    zf->count_ = zInfo.number_entry;
+    zf->names_ = Persistent<Array>::New(Array::New(zf->count_));
     int i = 0;
-    for (i = 0; i < num; i++) {
-        struct zip_stat st;
-        zip_stat_index(za, i, 0, &st);
-        zf->names_.push_back(st.name);
+    if(zf->count_ > 0) {
+      unz_file_info st;
+      char entryName[1024];
+      int unzRes = unzGoToFirstFile(za);
+      while (unzRes == UNZ_OK) {
+          unzGetCurrentFileInfo(za, &st, entryName, 1024, 0, 0, 0, 0);
+          if(st.size_filename > 1023) {
+            entryName[1023] = 0;
+            std::stringstream s;
+            s << "Unsupported path length for entry: " << entryName << "\n";
+            return ThrowException(Exception::Error(
+                                                   String::New(s.str().c_str())));
+          }
+          zf->names_->Set(i++, String::New(entryName));
+          unzRes = unzGoToNextFile(za);
+      }
+      if(unzRes != UNZ_END_OF_LIST_OF_FILE) {
+        std::stringstream s;
+        s << "Unable to process file: " << input_file << "\n";
+        return ThrowException(Exception::Error(
+                                               String::New(s.str().c_str())));
+      }
     }
 
     zf->archive_ = za;
     zf->Wrap(args.This());
     return args.This();
+}
+
+Handle<Value> ZipFile::Destroy(const Arguments& args) {
+  ZipFile* zf = ObjectWrap::Unwrap<ZipFile>(args.This());
+  if(zf->archive_) {
+    unzClose(zf->archive_);
+    zf->archive_ = 0;
+  }
+  return Undefined();
 }
 
 Handle<Value> ZipFile::get_prop(Local<String> property,
@@ -83,16 +114,10 @@ Handle<Value> ZipFile::get_prop(Local<String> property,
     ZipFile* zf = ObjectWrap::Unwrap<ZipFile>(info.This());
     std::string a = TOSTR(property);
     if (a == "count") {
-        return scope.Close(Integer::New(zf->names_.size()));
+        return scope.Close(Integer::New(zf->count_));
     }
     if (a == "names") {
-        unsigned num = zf->names_.size();
-        Local<Array> a = Array::New(num);
-        for (unsigned i = 0; i < num; ++i) {
-            a->Set(i, String::New(zf->names_[i].c_str()));
-        }
-
-        return scope.Close(a);
+        return scope.Close(zf->names_);
     }
     return Undefined();
 }
@@ -107,59 +132,54 @@ Handle<Value> ZipFile::readFileSync(const Arguments& args) {
     std::string name = TOSTR(args[0]);
 
     ZipFile* zf = ObjectWrap::Unwrap<ZipFile>(args.This());
+    if(!zf->archive_)
+      return ThrowException(Exception::Error(String::New("Zip archive has been destroyed")));
 
-    struct zip_file *zf_ptr;
-
-    int idx = -1;
-
-    std::vector<std::string>::iterator it = std::find(zf->names_.begin(), zf->names_.end(), name);
-    if (it != zf->names_.end()) {
-        idx = distance(zf->names_.begin(), it);
-    }
-
-    if (idx == -1) {
+    int unzRes = unzLocateFile(zf->archive_, name.c_str(), 1);
+    if (unzRes == UNZ_END_OF_LIST_OF_FILE) {
         std::stringstream s;
         s << "No file found by the name of: '" << name << "\n";
         return ThrowException(Exception::Error(String::New(s.str().c_str())));
     }
 
-    if ((zf_ptr=zip_fopen_index(zf->archive_, idx, 0)) == NULL) {
-        zip_fclose(zf_ptr);
+    if ((unzRes=unzOpenCurrentFile(zf->archive_)) != UNZ_OK) {
         std::stringstream s;
-        s << "cannot open file #" << idx << " in " << name << ": archive error: " << zip_strerror(zf->archive_) << "\n";
+        s << "cannot open file " << name << ": archive error: " << unzRes << "\n";
         return ThrowException(Exception::Error(String::New(s.str().c_str())));
     }
 
-    struct zip_stat st;
-    zip_stat_index(zf->archive_, idx, 0, &st);
+    unz_file_info st;
+    unzGetCurrentFileInfo(zf->archive_, &st, 0, 0, 0, 0, 0, 0);
 
-    std::vector<unsigned char> data;
-    data.clear();
-    data.resize(st.size);
-
-    int result = 0;
-    result = static_cast<int>(zip_fread(zf_ptr, reinterpret_cast<void*> (&data[0]), data.size()));
-
-    if (result < 0) {
-        zip_fclose(zf_ptr);
-        std::stringstream s;
-        s << "error reading file #" << idx << " in " << name << ": archive error: " << zip_file_strerror(zf_ptr) << "\n";
-        return ThrowException(Exception::Error(String::New(s.str().c_str())));
+    char *data = new char[st.uncompressed_size];
+    if(!data) {
+      std::stringstream s;
+      s << "Unable to allocate buffer to read file: " << name << "\n";
+      return ThrowException(Exception::Error(String::New(s.str().c_str())));
+    }
+    
+    unzRes = unzReadCurrentFile(zf->archive_, data, st.uncompressed_size);
+    unzCloseCurrentFile(zf->archive_);
+    if (unzRes < 0) {
+      std::stringstream s;
+      s << "error reading file " << name << ": archive error: " << unzRes << "\n";
+      return ThrowException(Exception::Error(String::New(s.str().c_str())));
     }
 
-    node::Buffer *retbuf = Buffer::New(reinterpret_cast<char *>(&data[0]), data.size());
-    zip_fclose(zf_ptr);
+    node::Buffer *retbuf = Buffer::New(data, st.uncompressed_size);
+    delete[] data;
     return scope.Close(retbuf->handle_);
 }
 
 typedef struct {
     uv_work_t request;
     ZipFile* zf;
-    struct zip *za;
+    unzFile za;
     std::string name;
     bool error;
     std::string error_name;
-    std::vector<unsigned char> data;
+    char *data;
+    long length;
     Persistent<Function> cb;
 } closure_t;
 
@@ -184,20 +204,19 @@ Handle<Value> ZipFile::readFile(const Arguments& args) {
     std::string name = TOSTR(args[0]);
 
     ZipFile* zf = ObjectWrap::Unwrap<ZipFile>(args.This());
+    if(!zf->archive_)
+      return ThrowException(Exception::Error(String::New("Zip archive has been destroyed")));
 
     closure_t *closure = new closure_t();
     closure->request.data = closure;
 
-    // libzip is not threadsafe so we cannot use the zf->archive_
+    // minizip is not threadsafe so we cannot use the zf->archive_
     // instead we open a new zip archive for each thread
-    struct zip *za;
+    unzFile za;
     int err;
-    char errstr[1024];
-    if ((za = zip_open(zf->file_name_.c_str() , 0, &err)) == NULL) {
-        zip_error_to_str(errstr, sizeof(errstr), err, errno);
+    if ((za = unzOpen(zf->file_name_.c_str())) == NULL) {
         std::stringstream s;
-        s << "cannot open file: " << zf->file_name_ << " error: " << errstr << "\n";
-        zip_close(za);
+        s << "cannot open file: " << zf->file_name_ << "\n";
         return ThrowException(Exception::Error(
                                   String::New(s.str().c_str())));
     }
@@ -206,6 +225,7 @@ Handle<Value> ZipFile::readFile(const Arguments& args) {
     closure->za = za;
     closure->error = false;
     closure->name = name;
+    closure->data = 0;
     closure->cb = Persistent<Function>::New(Handle<Function>::Cast(args[args.Length()-1]));
     uv_queue_work(uv_default_loop(), &closure->request, Work_ReadFile, Work_AfterReadFile);
     uv_ref(uv_default_loop());
@@ -217,48 +237,45 @@ Handle<Value> ZipFile::readFile(const Arguments& args) {
 void ZipFile::Work_ReadFile(uv_work_t* req) {
     closure_t *closure = static_cast<closure_t *>(req->data);
 
-    struct zip_file *zf_ptr = NULL;
-
-    int idx = -1;
-
-    std::vector<std::string>::iterator it = std::find(closure->zf->names_.begin(),
-                                                      closure->zf->names_.end(),
-                                                      closure->name);
-    if (it != closure->zf->names_.end()) {
-        idx = distance(closure->zf->names_.begin(), it);
+    int unzRes = unzLocateFile(closure->za, closure->name.c_str(), 1);
+    if (unzRes == UNZ_END_OF_LIST_OF_FILE) {
+      std::stringstream s;
+      s << "No file found by the name of: '" << closure->name << "\n";
+      closure->error = true;
+      closure->error_name = s.str();
+      return;
     }
-
-    if (idx == -1) {
-        std::stringstream s;
-        s << "No file found by the name of: '" << closure->name << "\n";
-        closure->error = true;
-        closure->error_name = s.str();
-    } else {
-        if ((zf_ptr = zip_fopen_index(closure->za, idx, 0)) == NULL) {
-            std::stringstream s;
-            s << "cannot open file #" << idx << " in "
-              << closure->name << ": archive error: " << zip_strerror(closure->za) << "\n";
-            closure->error = true;
-            closure->error_name = s.str();
-        } else {
-            struct zip_stat st;
-            zip_stat_index(closure->za, idx, 0, &st);
-            closure->data.clear();
-            closure->data.resize(st.size);
-
-            int result =  0;
-            result = static_cast<int>(zip_fread(zf_ptr, reinterpret_cast<void*> (&closure->data[0]), closure->data.size()));
-
-            if (result < 0) {
-                std::stringstream s;
-                s << "error reading file #" << idx << " in "
-                  << closure->name << ": archive error: " << zip_file_strerror(zf_ptr) << "\n";
-                closure->error = true;
-                closure->error_name = s.str();
-            }
-        }
+  
+    if ((unzRes=unzOpenCurrentFile(closure->za)) != UNZ_OK) {
+      std::stringstream s;
+      s << "cannot open file " << closure->name << ": archive error: " << unzRes << "\n";
+      closure->error = true;
+      closure->error_name = s.str();
+      return;
     }
-    zip_fclose(zf_ptr);
+  
+    unz_file_info st;
+    unzGetCurrentFileInfo(closure->za, &st, 0, 0, 0, 0, 0, 0);
+
+    closure->length = st.uncompressed_size;
+    closure->data = new char[closure->length];
+    if(!closure->data) {
+      std::stringstream s;
+      s << "Unable to allocate buffer to read file: " << closure->name << "\n";
+      closure->error = true;
+      closure->error_name = s.str();
+      return;
+    }
+  
+    unzRes = unzReadCurrentFile(closure->za, closure->data, closure->length);
+    unzCloseCurrentFile(closure->za);
+    if (unzRes < 0) {
+      std::stringstream s;
+      s << "error reading file " << closure->name << ": archive error: " << unzRes << "\n";
+      closure->error = true;
+      closure->error_name = s.str();
+      return;
+    }
 }
 
 void ZipFile::Work_AfterReadFile(uv_work_t* req) {
@@ -272,7 +289,7 @@ void ZipFile::Work_AfterReadFile(uv_work_t* req) {
         Local<Value> argv[1] = { Exception::Error(String::New(closure->error_name.c_str())) };
         closure->cb->Call(Context::GetCurrent()->Global(), 1, argv);
     } else {
-        node::Buffer *retbuf = Buffer::New(reinterpret_cast<char *>(&closure->data[0]), closure->data.size());
+        node::Buffer *retbuf = Buffer::New(closure->data, closure->length);
         Local<Value> argv[2] = { Local<Value>::New(Null()), Local<Value>::New(retbuf->handle_) };
         closure->cb->Call(Context::GetCurrent()->Global(), 2, argv);
     }
@@ -284,5 +301,6 @@ void ZipFile::Work_AfterReadFile(uv_work_t* req) {
     closure->zf->Unref();
     uv_unref(uv_default_loop());
     closure->cb.Dispose();
+    unzClose(closure->za);
     delete closure;
 }
