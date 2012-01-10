@@ -5,11 +5,9 @@
 
 #define TOSTR(obj) (*String::Utf8Value((obj)->ToString()))
 
-Persistent<FunctionTemplate> ZipFile::constructor;
-
 void ZipFile::Initialize(Handle<Object> target) {
     HandleScope scope;
-    constructor = Persistent<FunctionTemplate>::New(FunctionTemplate::New(ZipFile::New));
+    Local<FunctionTemplate> constructor = FunctionTemplate::New(ZipFile::New);
     constructor->InstanceTemplate()->SetInternalFieldCount(1);
     constructor->SetClassName(String::NewSymbol("ZipFile"));
 
