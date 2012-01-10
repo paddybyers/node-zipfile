@@ -16,10 +16,6 @@ void ZipFile::Initialize(Handle<Object> target) {
     NODE_SET_PROTOTYPE_METHOD(constructor, "readFile", readFile);
     NODE_SET_PROTOTYPE_METHOD(constructor, "destroy", destroy);
 
-    // properties
-    constructor->InstanceTemplate()->SetAccessor(String::NewSymbol("count"), get_prop);
-    constructor->InstanceTemplate()->SetAccessor(String::NewSymbol("names"), get_prop);
-
     target->Set(String::NewSymbol("ZipFile"), constructor->GetFunction());
 }
 
@@ -65,6 +61,8 @@ Handle<Value> ZipFile::New(const Arguments& args) {
     }
 
     zf->count_ = zInfo.number_entry;
+    args.This()->Set(String::NewSymbol("count"), Integer::New(zf->count_));
+
     zf->names_ = Persistent<Array>::New(Array::New(zf->count_));
     int i = 0;
     if(zf->count_ > 0) {
@@ -88,6 +86,7 @@ Handle<Value> ZipFile::New(const Arguments& args) {
         return ThrowException(Exception::Error(String::New(errBuf)));
       }
     }
+    args.This()->Set(String::NewSymbol("names"), zf->names_);
 
     zf->archive_ = za;
     zf->Wrap(args.This());
@@ -101,20 +100,6 @@ Handle<Value> ZipFile::destroy(const Arguments& args) {
     zf->archive_ = 0;
   }
   return Undefined();
-}
-
-Handle<Value> ZipFile::get_prop(Local<String> property,
-                                const AccessorInfo& info) {
-    HandleScope scope;
-    ZipFile* zf = ObjectWrap::Unwrap<ZipFile>(info.This());
-    const char *a = TOSTR(property);
-    if (!strcmp(a, "count")) {
-        return scope.Close(Integer::New(zf->count_));
-    }
-    if (!strcmp(a, "names")) {
-        return scope.Close(zf->names_);
-    }
-    return Undefined();
 }
 
 Handle<Value> ZipFile::readFileSync(const Arguments& args) {

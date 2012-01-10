@@ -21,9 +21,6 @@ class ZipFile: public node::ObjectWrap {
     static Handle<Value> New(const Arguments &args);
     static Handle<Value> destroy(const Arguments &args);
 
-    static Handle<Value> get_prop(Local<String> property,
-                                  const AccessorInfo& info);
-
     // Sync
     static Handle<Value> readFileSync(const Arguments& args);
 
