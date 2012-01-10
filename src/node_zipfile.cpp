@@ -208,12 +208,19 @@ Handle<Value> ZipFile::readFile(const Arguments& args) {
 
     size_t nameLen = strlen(name) + 1;
     closure->name = new char[nameLen];
-    if(closure->name) {
+    if(!closure->name) {
       return ThrowException(Exception::Error(String::New("Out of memory")));
     }
+    memcpy(closure->name, name, nameLen);
+#ifdef NODE_STATICS
+    uv_loop_t *loop = node::Isolate::GetCurrent()->Loop();
+#else
+    uv_loop_t *loop = uv_default_loop();
+#endif
+  
     closure->cb = Persistent<Function>::New(Handle<Function>::Cast(args[args.Length()-1]));
-    uv_queue_work(uv_default_loop(), &closure->request, Work_ReadFile, Work_AfterReadFile);
-    uv_ref(uv_default_loop());
+    uv_queue_work(loop, &closure->request, Work_ReadFile, Work_AfterReadFile);
+    uv_ref(loop);
     zf->Ref();
     return Undefined();
 }
@@ -267,7 +274,6 @@ void ZipFile::Work_ReadFile(uv_work_t* req) {
       closure->error_name = new char[errLen];
       memcpy(closure->error_name, errBuf, errLen);
       closure->error = true;
-      return;
     }
 }
 
@@ -293,7 +299,7 @@ void ZipFile::Work_AfterReadFile(uv_work_t* req) {
     }
 
     closure->zf->Unref();
-    uv_unref(uv_default_loop());
+    uv_unref(req->loop);
     closure->cb.Dispose();
     delete[] closure->name;
     unzClose(closure->za);
