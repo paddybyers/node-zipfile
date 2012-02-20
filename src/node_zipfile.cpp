@@ -3,8 +3,6 @@
 #include <node_buffer.h>
 #include <string.h>
 
-#define TOSTR(obj) (*String::Utf8Value((obj)->ToString()))
-
 void ZipFile::Initialize(Handle<Object> target) {
     HandleScope scope;
     Local<FunctionTemplate> constructor = FunctionTemplate::New(ZipFile::New);
@@ -43,20 +41,20 @@ Handle<Value> ZipFile::New(const Arguments& args) {
         return ThrowException(Exception::TypeError(
                                   String::New("first argument must be a path to a zipfile")));
 
-    const char *input_file = TOSTR(args[0]);
+    String::Utf8Value input_file(args[0]);
     unzFile za;
-    if ((za = unzOpen(input_file)) == NULL) {
+    if ((za = unzOpen(*input_file)) == NULL) {
         char errBuf[1024];
-        snprintf(errBuf, 1024, "Unable to open file: %s", input_file);
+        snprintf(errBuf, 1024, "Unable to open file: %s", *input_file);
         return ThrowException(Exception::Error(String::New(errBuf)));
     }
 
-    ZipFile* zf = new ZipFile(input_file);
+    ZipFile* zf = new ZipFile(*input_file);
   
     unz_global_info zInfo;
     if (unzGetGlobalInfo(za, &zInfo) != UNZ_OK) {
       char errBuf[1024];
-      snprintf(errBuf, 1024, "Unable to process file: %s", input_file);
+      snprintf(errBuf, 1024, "Unable to process file: %s", *input_file);
       return ThrowException(Exception::Error(String::New(errBuf)));
     }
 
@@ -82,7 +80,7 @@ Handle<Value> ZipFile::New(const Arguments& args) {
       }
       if(unzRes != UNZ_END_OF_LIST_OF_FILE) {
         char errBuf[1024];
-        snprintf(errBuf, 1024, "Unable to process file: %s", input_file);
+        snprintf(errBuf, 1024, "Unable to process file: %s", *input_file);
         return ThrowException(Exception::Error(String::New(errBuf)));
       }
     }
@@ -109,22 +107,21 @@ Handle<Value> ZipFile::readFileSync(const Arguments& args) {
         return ThrowException(Exception::TypeError(
                                   String::New("first argument must be a file name inside the zip")));
 
-    const char *name = TOSTR(args[0]);
-
+    String::Utf8Value name(args[0]);
     ZipFile* zf = ObjectWrap::Unwrap<ZipFile>(args.This());
     if(!zf->archive_)
       return ThrowException(Exception::Error(String::New("Zip archive has been destroyed")));
 
-    int unzRes = unzLocateFile(zf->archive_, name, 1);
+    int unzRes = unzLocateFile(zf->archive_, *name, 1);
     if (unzRes == UNZ_END_OF_LIST_OF_FILE) {
         char errBuf[1024];
-        snprintf(errBuf, 1024, "No file found by the name of: %s", name);
+        snprintf(errBuf, 1024, "No file found by the name of: %s", *name);
         return ThrowException(Exception::Error(String::New(errBuf)));
     }
 
     if ((unzRes=unzOpenCurrentFile(zf->archive_)) != UNZ_OK) {
         char errBuf[1024];
-        snprintf(errBuf, 1024, "Unable to open file: %s: archive error: %d", name, unzRes);
+        snprintf(errBuf, 1024, "Unable to open file: %s: archive error: %d", *name, unzRes);
         return ThrowException(Exception::Error(String::New(errBuf)));
     }
 
@@ -134,7 +131,7 @@ Handle<Value> ZipFile::readFileSync(const Arguments& args) {
     char *data = new char[st.uncompressed_size];
     if(!data) {
       char errBuf[1024];
-      snprintf(errBuf, 1024, "Unable to allocate buffer to read file: %s", name);
+      snprintf(errBuf, 1024, "Unable to allocate buffer to read file: %s", *name);
       return ThrowException(Exception::Error(String::New(errBuf)));
     }
     
@@ -142,7 +139,7 @@ Handle<Value> ZipFile::readFileSync(const Arguments& args) {
     unzCloseCurrentFile(zf->archive_);
     if (unzRes < 0) {
       char errBuf[1024];
-      snprintf(errBuf, 1024, "Unable to read file: %s: archive error: %d", name, unzRes);
+      snprintf(errBuf, 1024, "Unable to read file: %s: archive error: %d", *name, unzRes);
       return ThrowException(Exception::Error(String::New(errBuf)));
     }
 
@@ -181,7 +178,7 @@ Handle<Value> ZipFile::readFile(const Arguments& args) {
         return ThrowException(Exception::TypeError(
                                   String::New("last argument must be a callback function")));
 
-    const char *name = TOSTR(args[0]);
+    String::Utf8Value name(args[0]);
 
     ZipFile* zf = ObjectWrap::Unwrap<ZipFile>(args.This());
     if(!zf->archive_)
@@ -206,12 +203,12 @@ Handle<Value> ZipFile::readFile(const Arguments& args) {
     closure->error_name = 0;
     closure->data = 0;
 
-    size_t nameLen = strlen(name) + 1;
+    size_t nameLen = name.length() + 1;
     closure->name = new char[nameLen];
     if(!closure->name) {
       return ThrowException(Exception::Error(String::New("Out of memory")));
     }
-    memcpy(closure->name, name, nameLen);
+    memcpy(closure->name, *name, nameLen);
 #ifdef NODE_STATICS
     uv_loop_t *loop = node::Isolate::GetCurrent()->Loop();
 #else
