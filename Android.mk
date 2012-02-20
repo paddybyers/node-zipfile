@@ -5,7 +5,7 @@
 LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := zipfile 
+LOCAL_MODULE := _zipfile 
 
 LOCAL_CFLAGS := \
 	-D__POSIX__ \
