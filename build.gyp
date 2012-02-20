@@ -4,15 +4,17 @@
       'node_module_sources': [
           "src/_zipfile.cc",
           "src/node_zipfile.cpp",
+          "../../nodejs-0.6/node/deps/zlib/contrib/minizip/ioapi.c",
+          "../../nodejs-0.6/node/deps/zlib/contrib/minizip/unzip.c",
       ],
-      'node_root': '/opt/node-v6.1',
+      'node_root': '/Users/paddy/data/work/dev/nodejs-0.6/',
       'node_root_win': 'c:\\node',
       'deps_root_win': 'c:\\dev2'
   },
   'targets': [
     {
       'target_name': '_zipfile',
-      'product_name': '_zipfile',
+      'product_name': 'zipfile',
       'type': 'loadable_module',
       'product_prefix': '',
       'product_extension':'node',
@@ -27,17 +29,19 @@
       'conditions': [
         [ 'OS=="mac"', {
           'libraries': [
-            '-lz',
-            '-L../../deps/libzip-0.10/lib/.libs',
-            '-lzip',
-            '-undefined dynamic_lookup'
+            '-undefined dynamic_lookup',
           ],
+          'xcode_settings': {
+            'OTHER_LDFLAGS': [
+              '-undefined dynamic_lookup'
+            ]
+          },
           'include_dirs': [
              'include/',
-             'deps/libzip-0.10/',
-             'deps/libzip-0.10/lib/',
-             '<@(node_root)/include/node',
-             '<@(node_root)/include',
+             '<@(node_root)/node/src',
+             '<@(node_root)/node/deps/v8/include',
+             '<@(node_root)/node/deps/uv/include',
+             '<@(node_root)/node/deps/zlib/contrib/minizip',
           ],
         }],
         [ 'OS=="win"', {
@@ -49,7 +53,6 @@
           ],
           'libraries': [ 
               'node.lib',
-              'zip.lib',
 			  'zlib.lib'
           ],
           'include_dirs': [
